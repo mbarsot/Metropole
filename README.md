@@ -131,8 +131,12 @@ Endpoints:
 | `GET /api/status` | Check Ollama model discovery |
 | `POST /api/chat` | JSON `question` and optional `history` of user/assistant messages |
 
-The assistant is prompted to answer from the retrieved procedures and cite them.
-If no excerpts match, it returns a clear no-match message without calling Ollama.
+The assistant first searches the knowledge repository. When excerpts match, it
+answers from those procedures and cites them. If no excerpts match, it asks the
+same Ollama model to answer using its general knowledge, retaining conversation
+context for follow-up questions. These answers are labelled **General knowledge
+(no matching internal procedure found)** and have no internal source references.
+This fallback uses the model's learned knowledge; it does not search the internet.
 Retrieval uses keyword search rather than embeddings; try product and task names
 when results are weak. Model answers and inferred tags still require human review.
 Metropole never executes operating commands. It sends retrieved procedure text

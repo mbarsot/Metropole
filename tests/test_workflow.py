@@ -47,7 +47,13 @@ class StubOllama(BaseHTTPRequestHandler):
         payload = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         self.calls.append(payload)
         naming = "Name a datacenter procedure" in payload["messages"][0]["content"]
-        answer = "rack-access-checklist" if naming else "Confirm the backup date before restoring files. [1]"
+        general = "using your general knowledge" in payload["messages"][0]["content"]
+        if naming:
+            answer = "rack-access-checklist"
+        elif general:
+            answer = "Choose a VM backup tool compatible with your hypervisor and test a restore."
+        else:
+            answer = "Confirm the backup date before restoring files. [1]"
         self.respond({"message": {"role": "assistant", "content": answer}})
 
 
@@ -154,6 +160,8 @@ class WorkflowTests(unittest.TestCase):
         chat = Chat(self.store, self.client)
         result = chat.ask("How do I restore Avamar files?")
         self.assertIn("[1]", result["answer"])
+        self.assertNotIn("General knowledge", result["answer"])
+        self.assertIn("Use only the supplied excerpts", StubOllama.calls[-1]["messages"][0]["content"])
         self.assertEqual(result["sources"][0]["tag"], "restore-files-from-avamar")
         history = [{"role": "user", "content": "How do I restore Avamar files?"}, {"role": "assistant", "content": result["answer"]}]
         self.assertTrue(chat.ask("Which date?", history)["sources"])
@@ -162,11 +170,40 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("Reference excerpts", sent["messages"][-1]["content"])
         self.assertEqual(sent["messages"][1], history[0])
 
-    def test_no_match_does_not_invent_answer(self):
+    def test_no_match_uses_labelled_general_knowledge(self):
         self.seed()
         result = Chat(self.store, self.client).ask("Switch firmware upgrades")
         self.assertEqual(result["sources"], [])
-        self.assertEqual(StubOllama.calls, [])
+        self.assertEqual(len(StubOllama.calls), 1)
+        self.assertTrue(result["answer"].startswith("General knowledge (no matching internal procedure found):"))
+        self.assertIn("Choose a VM backup tool", result["answer"])
+        self.assertNotIn("[1]", result["answer"])
+        sent = StubOllama.calls[0]
+        self.assertIn("No matching procedure", sent["messages"][0]["content"])
+        self.assertEqual(sent["messages"][-1]["content"], "Switch firmware upgrades")
+
+    def test_empty_repository_general_knowledge_and_followup(self):
+        chat = Chat(self.store, self.client)
+        result = chat.ask("How to backup a VM?")
+        history = [{"role": "user", "content": "How to backup a VM?"},
+                   {"role": "assistant", "content": result["answer"]}]
+        followup = chat.ask("What about testing it?", history)
+        self.assertEqual(followup["sources"], [])
+        self.assertEqual(StubOllama.calls[-1]["messages"][1:3], history)
+        self.assertIn("General knowledge", followup["answer"])
+
+    def test_flask_no_match_uses_general_knowledge(self):
+        browser = create_app(self.settings).test_client()
+        result = browser.post("/api/chat", json={"question": "How to backup a VM?"})
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(result.json["sources"], [])
+        self.assertIn("General knowledge", result.json["answer"])
+
+    def test_general_knowledge_model_failure_returns_error(self):
+        with patch.object(Ollama, "chat", side_effect=OllamaError("server unavailable")):
+            browser = create_app(self.settings).test_client()
+            result = browser.post("/api/chat", json={"question": "How to backup a VM?"})
+            self.assertEqual(result.status_code, 502)
 
     def test_explicit_missing_model_reports_error(self):
         client = Ollama(Settings(self.settings.host, "missing"))
