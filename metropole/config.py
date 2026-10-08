@@ -25,7 +25,7 @@ class Settings:
     host: str = "10.3.81.142"
     model: str = ""
     database: str = "data/knowledge.sqlite3"
-    timeout: float = 120
+    timeout: float = 500
 
     @classmethod
     def from_env(cls):
@@ -33,7 +33,7 @@ class Settings:
             host=os.getenv("OLLAMA_HOST", "10.3.81.142"),
             model=os.getenv("OLLAMA_MODEL", ""),
             database=os.getenv("METROPOLE_DB", "data/knowledge.sqlite3"),
-            timeout=float(os.getenv("OLLAMA_TIMEOUT", "120")),
+            timeout=float(os.getenv("OLLAMA_TIMEOUT", "500")),
         )
 
     @property

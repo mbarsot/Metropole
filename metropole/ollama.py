@@ -1,3 +1,5 @@
+import json
+
 import requests
 
 from .config import Settings
@@ -50,16 +52,58 @@ class Ollama:
             self.model = candidates[0]
         return self.model
 
-    def chat(self, messages, *, temperature=0.2, max_tokens=900):
+    def chat_stream(self, messages, *, temperature=0.2, max_tokens=900):
+        """Yield text as Ollama generates it; close the response on cancellation."""
         if not self.model:
             self.choose_model()
-        data = self._request("POST", "/api/chat", json={
-            "model": self.model,
-            "messages": messages,
-            "stream": False,
-            "options": {"temperature": temperature, "num_predict": max_tokens},
-        })
-        content = data.get("message", {}).get("content")
-        if not isinstance(content, str) or not content.strip():
+        received_text = False
+        completed = False
+        try:
+            with requests.post(
+                self.url + "/api/chat",
+                timeout=(5, self.timeout),
+                stream=True,
+                json={
+                    "model": self.model,
+                    "messages": messages,
+                    "stream": True,
+                    "options": {"temperature": temperature, "num_predict": max_tokens},
+                },
+            ) as response:
+                response.raise_for_status()
+                # Avoid buffering short token events until a large chunk fills.
+                for line in response.iter_lines(chunk_size=1):
+                    if not line:
+                        continue
+                    data = json.loads(line)
+                    if not isinstance(data, dict):
+                        raise OllamaError("Ollama returned an unexpected stream event.")
+                    if data.get("error"):
+                        raise OllamaError(str(data["error"]))
+                    message = data.get("message", {})
+                    if not isinstance(message, dict):
+                        raise OllamaError("Ollama returned an invalid message.")
+                    content = message.get("content", "")
+                    if not isinstance(content, str):
+                        raise OllamaError("Ollama returned invalid answer text.")
+                    if content:
+                        received_text = True
+                        yield content
+                    if data.get("done") is True:
+                        completed = True
+                        break
+        except (requests.RequestException, ValueError) as exc:
+            raise OllamaError(
+                f"Ollama request failed at {self.url}/api/chat: {exc}. "
+                "Check the host, network/VPN access, and that Ollama is listening."
+            ) from exc
+        if not completed:
+            raise OllamaError("Ollama's response ended before completion. Please retry.")
+        if not received_text:
             raise OllamaError("Ollama returned no answer text.")
-        return content.strip()
+
+    def chat(self, messages, *, temperature=0.2, max_tokens=900):
+        # Loader and JSON API callers still need one complete answer.
+        return "".join(self.chat_stream(
+            messages, temperature=temperature, max_tokens=max_tokens
+        )).strip()

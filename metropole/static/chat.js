@@ -14,6 +14,13 @@ function append(role, text, sources = []) {
   const content = document.createElement('p');
   content.textContent = text;
   article.append(label, content);
+  addSources(article, sources);
+  messages.append(article);
+  article.scrollIntoView({ block: 'end', behavior: 'smooth' });
+  return article;
+}
+
+function addSources(article, sources) {
   for (const source of sources) {
     const details = document.createElement('details');
     const summary = document.createElement('summary');
@@ -23,9 +30,6 @@ function append(role, text, sources = []) {
     details.append(summary, excerpt);
     article.append(details);
   }
-  messages.append(article);
-  article.scrollIntoView({ block: 'end', behavior: 'smooth' });
-  return article;
 }
 
 form.addEventListener('submit', async (event) => {
@@ -40,19 +44,77 @@ form.addEventListener('submit', async (event) => {
   document.querySelector('#welcome')?.remove();
   const userMessage = append('user', question);
   input.value = '';
+  let assistantMessage = null;
+  let answer = '';
+  let sources = [];
+  let receivedToken = false;
+  let completed = false;
   try {
     const response = await fetch('/api/chat', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question, history: history.slice(-12) }),
+      body: JSON.stringify({ question, history: history.slice(-12), stream: true }),
     });
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.error || 'Could not obtain an answer.');
-    append('assistant', result.answer, result.sources);
-    history.push({ role: 'user', content: question }, { role: 'assistant', content: result.answer.slice(0, 8000) });
+    if (!response.ok) {
+      const result = await response.json();
+      throw new Error(result.error || 'Could not obtain an answer.');
+    }
+    if (!response.body) throw new Error('Your browser does not support streamed responses.');
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let pending = '';
+    function eventLine(line) {
+      if (!line.trim()) return;
+      if (completed) throw new Error('Unexpected data after answer completion.');
+      const event = JSON.parse(line);
+      if (event.type === 'error') throw new Error(event.error);
+      if (event.type === 'metadata') {
+        sources = event.sources;
+        answer = event.prefix;
+        assistantMessage = append('assistant', answer || 'Waiting for Ollama…');
+      } else if (event.type === 'token') {
+        if (!assistantMessage) throw new Error('Missing response metadata.');
+        answer += event.text;
+        receivedToken = true;
+        assistantMessage.querySelector('p').textContent = answer;
+        send.textContent = 'Receiving…';
+        assistantMessage.scrollIntoView({ block: 'end', behavior: 'auto' });
+      } else if (event.type === 'done') {
+        completed = true;
+      } else {
+        throw new Error('Unexpected stream event.');
+      }
+    }
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        pending += decoder.decode(value, { stream: true });
+        const lines = pending.split('\n');
+        pending = lines.pop();
+        lines.forEach(eventLine);
+      }
+      pending += decoder.decode();
+      if (pending.trim()) eventLine(pending);
+      if (!completed || !receivedToken) throw new Error('The answer stream ended before completion. Please retry.');
+    } finally {
+      if (!completed) {
+        try { await reader.cancel(); } catch (_) { /* Preserve the original error. */ }
+      }
+      reader.releaseLock();
+    }
+    addSources(assistantMessage, sources);
+    history.push({ role: 'user', content: question }, { role: 'assistant', content: answer.slice(0, 8000) });
     history = history.slice(-12);
   } catch (err) {
     error.textContent = err.message;
-    userMessage.remove();
+    if (receivedToken) {
+      const note = document.createElement('p');
+      note.textContent = 'Incomplete answer — please retry.';
+      assistantMessage.append(note);
+    } else {
+      assistantMessage?.remove();
+      userMessage.remove();
+    }
     input.value = question;
   } finally {
     busy = false;

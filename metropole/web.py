@@ -1,4 +1,7 @@
-from flask import Flask, jsonify, render_template, request
+import json
+from contextlib import closing
+
+from flask import Flask, Response, jsonify, render_template, request, stream_with_context
 
 from .chat import Chat
 from .config import Settings
@@ -42,6 +45,8 @@ def create_app(settings=None, *, client=None):
         data = request.get_json(silent=True)
         if not isinstance(data, dict) or not isinstance(data.get("question"), str):
             return jsonify(error="Supply a JSON object with a question string."), 400
+        if not isinstance(data.get("stream", False), bool):
+            return jsonify(error="stream must be a boolean."), 400
         history = data.get("history", [])
         if not isinstance(history, list) or len(history) > 12:
             return jsonify(error="History must contain at most 12 messages."), 400
@@ -50,6 +55,21 @@ def create_app(settings=None, *, client=None):
                     or not isinstance(item.get("content"), str) or len(item["content"]) > 8000):
                 return jsonify(error="Invalid conversation history."), 400
         try:
+            if data.get("stream", False):
+                # Validate before sending headers. Once streaming starts, failures
+                # are reported as terminal error events rather than HTTP statuses.
+                prepared = chat.prepare(data["question"], history)
+
+                def events():
+                    try:
+                        with closing(chat.stream(data["question"], history, prepared=prepared)) as stream:
+                            for event in stream:
+                                yield json.dumps(event) + "\n"
+                    except OllamaError as exc:
+                        yield json.dumps({"type": "error", "error": str(exc)}) + "\n"
+
+                return Response(stream_with_context(events()), mimetype="application/x-ndjson",
+                                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
             return jsonify(chat.ask(data["question"], history))
         except ValueError as exc:
             return jsonify(error=str(exc)), 400

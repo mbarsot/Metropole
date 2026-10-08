@@ -4,9 +4,10 @@ import json
 import tempfile
 import threading
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from docx import Document
 
@@ -22,6 +23,7 @@ from metropole.web import create_app
 class StubOllama(BaseHTTPRequestHandler):
     """Local protocol fixture; does not claim to validate a real model."""
     calls = []
+    release_stream = threading.Event()
 
     def log_message(self, *args):
         pass
@@ -54,7 +56,25 @@ class StubOllama(BaseHTTPRequestHandler):
             answer = "Choose a VM backup tool compatible with your hypervisor and test a restore."
         else:
             answer = "Confirm the backup date before restoring files. [1]"
-        self.respond({"message": {"role": "assistant", "content": answer}})
+        if payload.get("stream"):
+            events = [
+                {"message": {"content": answer[:20]}, "done": False},
+                {"message": {"content": answer[20:]}, "done": False},
+                {"message": {"content": ""}, "done": True},
+            ]
+            body = "".join(json.dumps(event) + "\n" for event in events).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/x-ndjson")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            first, remaining = body.split(b"\n", 1)
+            self.wfile.write(first + b"\n")
+            self.wfile.flush()
+            if "PAUSE_STREAM" in payload["messages"][-1]["content"]:
+                self.release_stream.wait(timeout=5)
+            self.wfile.write(remaining)
+        else:
+            self.respond({"message": {"role": "assistant", "content": answer}})
 
 
 class WorkflowTests(unittest.TestCase):
@@ -166,7 +186,7 @@ class WorkflowTests(unittest.TestCase):
         history = [{"role": "user", "content": "How do I restore Avamar files?"}, {"role": "assistant", "content": result["answer"]}]
         self.assertTrue(chat.ask("Which date?", history)["sources"])
         sent = StubOllama.calls[-1]
-        self.assertEqual(sent["stream"], False)
+        self.assertEqual(sent["stream"], True)
         self.assertIn("Reference excerpts", sent["messages"][-1]["content"])
         self.assertEqual(sent["messages"][1], history[0])
 
@@ -209,6 +229,86 @@ class WorkflowTests(unittest.TestCase):
         client = Ollama(Settings(self.settings.host, "missing"))
         with self.assertRaises(OllamaError):
             client.choose_model()
+
+    def test_ollama_yields_before_response_finishes(self):
+        StubOllama.release_stream.clear()
+        stream = self.client.chat_stream([{"role": "user", "content": "PAUSE_STREAM"}])
+        try:
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(next, stream)
+                try:
+                    first = future.result(timeout=2)
+                    self.assertEqual(first, "Confirm the backup d")
+                    self.assertFalse(StubOllama.release_stream.is_set())
+                finally:
+                    StubOllama.release_stream.set()
+            self.assertEqual(first + "".join(stream), "Confirm the backup date before restoring files. [1]")
+        finally:
+            StubOllama.release_stream.set()
+            stream.close()
+
+    def test_flask_stream_events_and_general_knowledge(self):
+        browser = create_app(self.settings).test_client()
+        response = browser.post("/api/chat", json={"question": "Backup a VM?", "stream": True}, buffered=False)
+        self.assertEqual(response.mimetype, "application/x-ndjson")
+        events = [json.loads(line) for line in response.response]
+        self.assertEqual([e["type"] for e in events], ["metadata", "token", "token", "done"])
+        self.assertEqual(events[0]["sources"], [])
+        self.assertIn("General knowledge", events[0]["prefix"])
+        self.assertEqual("".join(e["text"] for e in events if e["type"] == "token"),
+                         "Choose a VM backup tool compatible with your hypervisor and test a restore.")
+        response.close()
+
+    def test_flask_stream_preserves_internal_sources(self):
+        self.seed()
+        browser = create_app(self.settings).test_client()
+        response = browser.post("/api/chat", json={"question": "Avamar restore", "stream": True})
+        events = [json.loads(line) for line in response.data.splitlines()]
+        self.assertEqual(events[0]["sources"][0]["tag"], "restore-files-from-avamar")
+        self.assertEqual(events[0]["prefix"], "")
+        self.assertEqual(events[-1]["type"], "done")
+
+    def test_stream_errors_are_terminal_and_partial_text_is_preserved(self):
+        def failing_stream(*args, **kwargs):
+            yield "Partial answer"
+            raise OllamaError("connection lost")
+        with patch.object(Ollama, "chat_stream", side_effect=failing_stream):
+            browser = create_app(self.settings).test_client()
+            response = browser.post("/api/chat", json={"question": "Backup a VM", "stream": True})
+            events = [json.loads(line) for line in response.data.splitlines()]
+            self.assertEqual([e["type"] for e in events], ["metadata", "token", "error"])
+            self.assertEqual(events[1]["text"], "Partial answer")
+            self.assertEqual(events[-1]["error"], "connection lost")
+
+    def test_stream_validation_happens_before_headers(self):
+        browser = create_app(self.settings).test_client()
+        for payload in [{"question": "", "stream": True}, {"question": "VM", "stream": "yes"}]:
+            result = browser.post("/api/chat", json=payload)
+            self.assertEqual(result.status_code, 400)
+            self.assertEqual(result.mimetype, "application/json")
+
+    def test_incomplete_and_malformed_ollama_streams_fail(self):
+        self.client.model = "test-model:latest"
+        for lines in [[b'{"message":{"content":"partial"}}'], [b'not json'],
+                      [b'{"error":"model crashed"}'], [b'{"done":true}']]:
+            response = MagicMock()
+            response.__enter__.return_value = response
+            response.iter_lines.return_value = iter(lines)
+            with patch("metropole.ollama.requests.post", return_value=response):
+                with self.assertRaises(OllamaError):
+                    list(self.client.chat_stream([{"role": "user", "content": "VM backup"}]))
+            response.__exit__.assert_called_once()
+
+    def test_cancelling_stream_closes_upstream_connection(self):
+        self.client.model = "test-model:latest"
+        response = MagicMock()
+        response.__enter__.return_value = response
+        response.iter_lines.return_value = iter([b'{"message":{"content":"first"}}', b'{"done":true}'])
+        with patch("metropole.ollama.requests.post", return_value=response):
+            stream = self.client.chat_stream([{"role": "user", "content": "VM"}])
+            self.assertEqual(next(stream), "first")
+            stream.close()
+        response.__exit__.assert_called_once()
 
     def test_flask_chat_status_and_validation(self):
         self.seed()

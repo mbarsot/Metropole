@@ -16,7 +16,7 @@ def connection_options(parser):
     parser.add_argument("--host", default=defaults.host, help="Ollama host or URL (default: 10.3.81.142)")
     parser.add_argument("--model", default=defaults.model, help="Installed Ollama chat model; otherwise auto-select")
     parser.add_argument("--db", default=defaults.database, help="SQLite knowledge repository path")
-    parser.add_argument("--timeout", default=defaults.timeout, type=float, help="Ollama response timeout in seconds")
+    parser.add_argument("--timeout", default=defaults.timeout, type=float, help="Ollama read timeout between received bytes in seconds (default: 500)")
     parser.add_argument("--prompt-host", action="store_true", help="Ask for an Ollama host at startup")
 
 
@@ -110,8 +110,21 @@ def interactive_chat(store, client):
         if not question:
             continue
         try:
-            result = chat.ask(question, history)
-            print(f"\nMetropole> {result['answer']}\n")
+            answer = ""
+            sources = []
+            print("\nMetropole> ", end="", flush=True)
+            for event in chat.stream(question, history):
+                if event["type"] == "metadata":
+                    sources = event["sources"]
+                    text = event["prefix"]
+                elif event["type"] == "token":
+                    text = event["text"]
+                else:
+                    continue
+                answer += text
+                print(text, end="", flush=True)
+            print("\n")
+            result = {"answer": answer, "sources": sources}
             for source in result["sources"]:
                 print(f"[{source['number']}] <{source['tag']}> — {source['source']}")
             history.extend([{"role": "user", "content": question}, {"role": "assistant", "content": result["answer"][:8000]}])

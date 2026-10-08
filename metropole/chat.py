@@ -21,7 +21,7 @@ class Chat:
         self.store = store
         self.client = client
 
-    def ask(self, question, history=None):
+    def prepare(self, question, history=None):
         question = question.strip()
         if not question:
             raise ValueError("Enter a question.")
@@ -35,11 +35,7 @@ class Chat:
             messages = [{"role": "system", "content": GENERAL_SYSTEM}]
             messages.extend(history[-12:])
             messages.append({"role": "user", "content": question})
-            answer = self.client.chat(messages)
-            return {
-                "answer": "General knowledge (no matching internal procedure found):\n\n" + answer,
-                "sources": [],
-            }
+            return messages, [], "General knowledge (no matching internal procedure found):\n\n"
         excerpts = "\n\n".join(
             f"[{index}] <{item['tag']}>\n{item['text']}\n</{item['tag']}>"
             for index, item in enumerate(sources, 1)
@@ -47,8 +43,23 @@ class Chat:
         messages = [{"role": "system", "content": SYSTEM}]
         messages.extend(history[-12:])
         messages.append({"role": "user", "content": f"Reference excerpts:\n{excerpts}\n\nQuestion: {question}"})
-        answer = self.client.chat(messages)
-        return {"answer": answer, "sources": [
+        references = [
             {"number": i, "tag": s["tag"], "source": s["source"], "excerpt": s["text"]}
             for i, s in enumerate(sources, 1)
-        ]}
+        ]
+        return messages, references, ""
+
+    def ask(self, question, history=None):
+        messages, sources, prefix = self.prepare(question, history)
+        return {"answer": prefix + self.client.chat(messages), "sources": sources}
+
+    def stream(self, question, history=None, *, prepared=None):
+        messages, sources, prefix = prepared or self.prepare(question, history)
+        yield {"type": "metadata", "sources": sources, "prefix": prefix}
+        tokens = self.client.chat_stream(messages)
+        try:
+            for token in tokens:
+                yield {"type": "token", "text": token}
+        finally:
+            tokens.close()
+        yield {"type": "done"}

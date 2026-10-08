@@ -47,7 +47,7 @@ Every subcommand also accepts `--db` and `--timeout`. Environment defaults:
 | --- | --- | --- |
 | `OLLAMA_HOST` | `10.3.81.142` | Existing Ollama server |
 | `OLLAMA_MODEL` | auto-select | Installed chat model name |
-| `OLLAMA_TIMEOUT` | `120` | Response timeout in seconds |
+| `OLLAMA_TIMEOUT` | `500` | Read timeout between received bytes, in seconds |
 | `METROPOLE_DB` | `data/knowledge.sqlite3` | Local repository path |
 
 The default database path is relative to the current working directory. Run from
@@ -111,6 +111,13 @@ metropole chat --host 10.3.81.142
 metropole serve --host 10.3.81.142 --port 5000
 ```
 
+Both chat interfaces display answer text as Ollama generates it. The default
+read timeout is 500 seconds: this limits waiting for the first response bytes or
+between subsequent bytes, rather than total answer time. Override it with
+`--timeout` or `OLLAMA_TIMEOUT`. A longer timeout does not speed up generation;
+streaming makes generated text visible sooner, but model loading or thinking can
+still delay the first text.
+
 In terminal chat, `/reset` starts a new conversation and `/quit` exits. In the web
 interface, use **New conversation**. Follow-up questions reuse recent user turns
 for retrieval. Responses include numbered references, and the web interface lets
@@ -129,7 +136,12 @@ Endpoints:
 | --- | --- |
 | `GET /health` | Local application/database health; does not claim Ollama readiness |
 | `GET /api/status` | Check Ollama model discovery |
-| `POST /api/chat` | JSON `question` and optional `history` of user/assistant messages |
+| `POST /api/chat` | JSON `question`, optional `history`, and optional boolean `stream` |
+
+The web interface sends `stream: true` and receives newline-delimited JSON
+metadata, token, and completion events. Errors after streaming begins arrive as
+terminal error events; incomplete replies are not added to conversation history.
+Omitting `stream` retains the complete JSON answer API for existing integrations.
 
 The assistant first searches the knowledge repository. When excerpts match, it
 answers from those procedures and cites them. If no excerpts match, it asks the
