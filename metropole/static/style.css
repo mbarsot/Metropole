@@ -34,10 +34,33 @@ h1 { font-weight: 550; font-size: clamp(26px, 3vw, 38px); letter-spacing: -1.3px
 details { font-size: 12px; border-top: 1px solid #e4ece6; padding: 10px 0; }
 summary { cursor: pointer; overflow-wrap: anywhere; color: #547664; }
 details p { color: #65766b; font-size: 12px !important; }
-form { position: relative; margin: 15px max(24px, calc((100% - 800px) / 2)) 0; }
+#chat-form { position: relative; margin: 15px max(24px, calc((100% - 800px) / 2)) 0; }
 textarea { width: 100%; resize: vertical; min-height: 85px; max-height: 200px; padding: 16px 110px 16px 18px; border: 1px solid #cbdad0; border-radius: 12px; background: #fff; font-size: 14px; line-height: 1.6; }
 #send { position: absolute; right: 12px; top: 17px; color: #fff; background: #286d57; border: 0; font-size: 12px; }
 #error { color: #a33232; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
 footer { text-align: center; color: #88978e; font-size: 10px; padding: 0 20px 18px; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); }
+.knowledge-actions { display: grid; gap: 8px; }
+.knowledge-actions button { text-align: left; font-size: 12px; }
+dialog { width: min(760px, 94vw); max-height: 88dvh; padding: 26px; border: 1px solid #d6e0dc; border-radius: 14px; color: inherit; background: #f8faf9; }
+dialog::backdrop { background: #183b2b66; }
+.dialog-heading { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+.dialog-heading h2 { font-size: 22px; margin: 0; }
+dialog section { margin-top: 24px; }
+dialog h3 { font-size: 15px; }
+dialog p, dialog label, dialog input, dialog li { font-size: 13px; line-height: 1.7; overflow-wrap: anywhere; }
+dialog form { margin: 0; }
+#upload-form > label:not(.checkbox-label) { display: block; margin: 12px 0 5px; font-weight: 600; }
+input[type="file"] { width: 100%; padding: 8px; background: #fff; border: 1px solid #d6e0dc; border-radius: 8px; }
+.checkbox-label { display: flex; gap: 8px; align-items: flex-start; margin: 16px 0 8px; }
+.checkbox-label input { margin-top: 6px; }
+.loader-help { color: #65766b; }
+#upload-submit { background: #286d57; color: white; }
+#upload-results { padding-left: 22px; max-height: 180px; overflow: auto; }
+.import-failed { color: #a33232; }
+.knowledge-file { background: white; padding: 14px 18px; margin: 12px 0; border: 1px solid #d6e0dc; border-radius: 9px; }
+.knowledge-file h4 { margin: 0; font-size: 14px; overflow-wrap: anywhere; }
+.knowledge-file p { margin: 4px 0; color: #65766b; font-size: 11px; }
+.knowledge-file ul { margin: 8px 0 0; padding-left: 22px; }
+#knowledge-section { border-top: 1px solid #d6e0dc; padding-top: 14px; }
 @media (max-width: 750px) { body { display: block; } aside { width: 100%; padding: 16px 20px; gap: 8px; border-right: 0; border-bottom: 1px solid #dce5df; } aside .eyebrow, .repository, .aside-note { display: none; } .brand { font-size: 18px; } .connection { margin: 0; } .connection p { display: inline; margin-right: 8px; } .connection code { display: block; margin: 6px 0; } main { height: calc(100dvh - 200px); min-height: 400px; } header { padding: 16px 22px; } #welcome { margin-top: 2vh; } }

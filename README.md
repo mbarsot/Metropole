@@ -118,11 +118,37 @@ between subsequent bytes, rather than total answer time. Override it with
 streaming makes generated text visible sooner, but model loading or thinking can
 still delay the first text.
 
+The web sidebar displays the active timeout used by the Flask process. Changing
+only the dataclass default does not override `Settings.from_env()`, an existing
+`OLLAMA_TIMEOUT`, or `--timeout`. Restart the running server after editing files.
+For an unambiguous setting, run `python -m metropole serve --timeout 500`.
+
 In terminal chat, `/reset` starts a new conversation and `/quit` exits. In the web
 interface, use **New conversation**. Follow-up questions reuse recent user turns
 for retrieval. Responses include numbered references, and the web interface lets
 you expand each source excerpt. Conversation history stays in terminal memory or
 the browser tab; it is not stored in the database.
+
+The Flask sidebar includes **Load documents** and **Show loaded knowledge**.
+Select multiple `.txt`, `.md`, or `.docx` files, or select a folder to include its
+subfolders (folder selection requires a supporting browser such as Chrome or Edge).
+Upload progress shows which files were loaded, each assigned `<skill>` tag, and
+individual failures. Untagged notes use Ollama by default; the optional checkbox
+uses first-line labels instead, equivalent to CLI `--offline-tags`. Fully tagged
+notes and Word documents do not require the model.
+
+**Show loaded knowledge** lists all imported files and their `<skills>`, including
+files loaded by the command-line application using the same database. Imports
+update the sidebar count and knowledge list without restarting Flask.
+
+Browser uploads are limited to 100 MB and 200 files per batch. Unsupported and
+temporary Word files in selected folders are skipped. Uploaded sources have a
+stable `upload://relative/path` identity: reuploading the same path replaces it;
+different folder paths remain separate sources. A CLI import of the same document
+uses its absolute filesystem path, so it is a separate source from a browser
+upload. Original uploads are processed in temporary storage and removed afterward;
+procedure text and labels persist in SQLite. Keep original documents yourself.
+Failed or empty imports preserve existing entries, and other files continue loading.
 
 Flask binds to loopback by default. This is a development interface without user
 authentication. For multi-user deployment, add authentication and run behind a
@@ -136,6 +162,8 @@ Endpoints:
 | --- | --- |
 | `GET /health` | Local application/database health; does not claim Ollama readiness |
 | `GET /api/status` | Check Ollama model discovery |
+| `GET /api/knowledge` | List loaded filenames, source identities, and skill tags |
+| `POST /api/load` | Multipart `files` and optional `offline_tags=true`; NDJSON progress |
 | `POST /api/chat` | JSON `question`, optional `history`, and optional boolean `stream` |
 
 The web interface sends `stream: true` and receives newline-delimited JSON

@@ -6,23 +6,42 @@
   <title>Metropole · Datacenter knowledge</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   <script src="{{ url_for('static', filename='chat.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='knowledge.js') }}" defer></script>
 </head>
 <body>
   <aside>
     <div class="brand"><span class="logo">M</span><strong>Metropole</strong></div>
     <p class="eyebrow">OPERATIONS KNOWLEDGE</p>
     <button id="reset" type="button">＋ New conversation</button>
-    <div class="repository"><span class="dot"></span> Knowledge repository<br><strong>{{ count }}</strong> procedures loaded</div>
-    <div class="connection"><p>Ollama connection</p><code>{{ host }}</code><p id="connection-status">Model: {{ model }}</p><button id="check" type="button">Check connection</button></div>
+    <div class="repository"><span class="dot"></span> Knowledge repository<br><strong id="procedure-count">{{ count }}</strong> procedures loaded</div>
+    <div class="knowledge-actions"><button id="open-loader" type="button">＋ Load documents</button><button id="show-knowledge" type="button">Show loaded knowledge</button></div>
+    <div class="connection"><p>Ollama connection</p><code>{{ host }}</code><p id="connection-status">Model: {{ model }}</p><p>Active read timeout: {{ timeout }} seconds</p><button id="check" type="button">Check connection</button></div>
     <p class="aside-note">Answers use your imported procedures first, then general model knowledge when no procedure matches. Review instructions before performing an operation.</p>
   </aside>
   <main>
     <header><span>Datacenter assistant</span><span class="badge">LOCAL MODEL</span></header>
     <section id="messages" aria-live="polite" aria-label="Conversation">
-      <div id="welcome"><p class="eyebrow">YOUR PROCEDURES, WITH CONTEXT</p><h1>What are you working on?</h1><p>Find an operating procedure, ask about its steps, and follow up on the details.</p><div class="suggestions"><button type="button" data-question="How do I restore files from Avamar?">Restore files from Avamar ↗</button><button type="button" data-question="What prerequisites should I check before a restore?">Check restore prerequisites ↗</button></div><p class="empty-note">Load your notes and documents with the Metropole loader to begin.</p></div>
+      <div id="welcome"><p class="eyebrow">YOUR PROCEDURES, WITH CONTEXT</p><h1>What are you working on?</h1><p>Find an operating procedure, ask about its steps, and follow up on the details.</p><div class="suggestions"><button type="button" data-question="How do I restore files from Avamar?">Restore files from Avamar ↗</button><button type="button" data-question="What prerequisites should I check before a restore?">Check restore prerequisites ↗</button></div><p class="empty-note">Use Load documents to add your notes and Word files.</p></div>
     </section>
     <form id="chat-form"><label class="sr-only" for="question">Your question</label><textarea id="question" rows="2" maxlength="4000" placeholder="Ask about a procedure…" required></textarea><button id="send" type="submit">Send ↑</button><p id="error" role="alert"></p></form>
     <footer>Internal procedures first · General knowledge fallback · Conversations stay in this tab</footer>
   </main>
+  <dialog id="knowledge-dialog" aria-labelledby="knowledge-title">
+    <div class="dialog-heading"><h2 id="knowledge-title">Knowledge repository</h2><button id="close-knowledge" type="button" aria-label="Close knowledge repository">Close ×</button></div>
+    <section id="loader-section">
+      <h3>Load documents</h3>
+      <p>Choose notes or Word documents, or select a folder and its subfolders. Supported: .txt, .md, .docx. Maximum 100 MB and 200 files per batch.</p>
+      <form id="upload-form">
+        <label for="document-files">Files</label><input id="document-files" type="file" accept=".txt,.md,.docx" multiple>
+        <label for="document-folder">Or a folder</label><input id="document-folder" type="file" webkitdirectory multiple>
+        <label class="checkbox-label"><input id="offline-tags" type="checkbox"> Use the first line as the label for untagged notes (no AI needed)</label>
+        <p class="loader-help">Otherwise, Ollama generates labels for untagged notes. Word labels come from filenames. Loading the same uploaded path again replaces its previous entries.</p>
+        <button id="upload-submit" type="submit">Load selected documents</button>
+        <p id="upload-status" role="status" aria-live="polite"></p>
+        <ul id="upload-results"></ul>
+      </form>
+    </section>
+    <section id="knowledge-section"><div class="dialog-heading"><h3>Loaded files and &lt;skills&gt;</h3><button id="refresh-knowledge" type="button">Refresh</button></div><p id="knowledge-status" role="status"></p><div id="knowledge-list"></div></section>
+  </dialog>
 </body>
 </html>

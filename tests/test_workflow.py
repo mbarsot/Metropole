@@ -339,6 +339,137 @@ class WorkflowTests(unittest.TestCase):
             self.assertEqual(main(["list", "--db", self.settings.database]), 0)
             self.assertEqual(main(["load", "--db", self.settings.database, str(self.root / "missing.txt")]), 1)
 
+    def upload(self, browser, name, content, **extra):
+        response = browser.post("/api/load", data={"files": (io.BytesIO(content), name), **extra})
+        self.assertEqual(response.status_code, 200)
+        return [json.loads(line) for line in response.data.splitlines()]
+
+    def test_upload_tagged_notes_and_knowledge_inventory(self):
+        self.seed()
+        browser = create_app(self.settings).test_client()
+        events = self.upload(browser, "Notes.txt", b"<vm-backup>Back up the VM using the approved backup product.</vm-backup>")
+        self.assertEqual([e["type"] for e in events], ["loading", "loaded", "done"])
+        self.assertEqual(events[1]["skills"], ["vm-backup"])
+        self.assertEqual(StubOllama.calls, [])
+        knowledge = browser.get("/api/knowledge").json
+        self.assertEqual(knowledge["procedures"], 2)
+        uploaded = next(file for file in knowledge["files"] if file["source"].startswith("upload://"))
+        self.assertEqual(uploaded["filename"], "Notes.txt")
+        self.assertEqual(uploaded["source"], "upload://Notes.txt")
+        self.assertEqual(uploaded["skills"][0]["tag"], "vm-backup")
+        self.assertTrue(self.store.search("VM backup"))
+        result = browser.post("/api/chat", json={"question": "VM backup"})
+        self.assertEqual(result.json["sources"][0]["tag"], "vm-backup")
+
+    def test_upload_word_document_uses_filename(self):
+        buffer = io.BytesIO()
+        document = Document()
+        document.add_paragraph("Restore the approved backup.")
+        document.save(buffer)
+        browser = create_app(self.settings).test_client()
+        events = self.upload(browser, "Restore VM.docx", buffer.getvalue())
+        self.assertEqual(events[1]["skills"], ["restore-vm"])
+        self.assertEqual(StubOllama.calls, [])
+
+    def test_upload_untagged_notes_infers_or_uses_offline_tags(self):
+        browser = create_app(self.settings).test_client()
+        events = self.upload(browser, "notes.txt", b"Check rack access")
+        self.assertEqual(events[1]["skills"], ["rack-access-checklist"])
+        self.assertEqual(len(StubOllama.calls), 1)
+        StubOllama.calls.clear()
+        events = self.upload(browser, "offline.txt", b"Check rack access", offline_tags="true")
+        self.assertEqual(events[1]["skills"], ["check-rack-access"])
+        self.assertEqual(StubOllama.calls, [])
+
+    def test_reupload_replaces_entries_and_empty_import_preserves_them(self):
+        browser = create_app(self.settings).test_client()
+        self.upload(browser, "notes.txt", b"<avamar>Restore Avamar files</avamar>")
+        self.upload(browser, "notes.txt", b"<vm-backup>Backup VM</vm-backup>")
+        self.assertEqual(self.store.search("Avamar"), [])
+        self.assertEqual(len(self.store.list_procedures()), 1)
+        events = self.upload(browser, "notes.txt", b" ")
+        self.assertEqual(events[1]["type"], "failed")
+        self.assertEqual(events[-1]["failed"], 1)
+        self.assertEqual(self.store.list_procedures()[0]["tag"], "vm-backup")
+
+    def test_upload_batch_continues_after_bad_file_and_keeps_folder_identity(self):
+        browser = create_app(self.settings).test_client()
+        response = browser.post("/api/load", data={"files": [
+            (io.BytesIO(b"bad document"), "broken.docx"),
+            (io.BytesIO(b"<rack>Rack procedure</rack>"), "folder-a/notes.txt"),
+            (io.BytesIO(b"<vm>VM procedure</vm>"), "folder-b/notes.txt"),
+        ]})
+        events = [json.loads(line) for line in response.data.splitlines()]
+        self.assertEqual(events[-1], {"type": "done", "loaded": 2, "failed": 1})
+        files = browser.get("/api/knowledge").json["files"]
+        self.assertEqual([item["source"] for item in files], ["upload://folder-a/notes.txt", "upload://folder-b/notes.txt"])
+
+    def test_failed_ai_label_preserves_previous_knowledge(self):
+        browser = create_app(self.settings).test_client()
+        self.upload(browser, "notes.txt", b"<rack>Rack procedure</rack>")
+        with patch.object(Ollama, "chat", side_effect=OllamaError("cannot connect")):
+            events = self.upload(browser, "notes.txt", b"Untagged replacement")
+        self.assertEqual(events[1]["type"], "failed")
+        self.assertIn("cannot connect", events[1]["error"])
+        self.assertEqual(self.store.list_procedures()[0]["tag"], "rack")
+
+    def test_upload_validation_and_path_traversal(self):
+        browser = create_app(self.settings).test_client()
+        self.assertEqual(browser.post("/api/load").status_code, 400)
+        for name in ["../escape.txt", "/absolute.txt", "C:\\escape.txt", "notes.exe"]:
+            events = self.upload(browser, name, b"<vm>Procedure</vm>")
+            self.assertEqual(events[1]["type"], "failed", name)
+        self.assertEqual(self.store.list_procedures(), [])
+        self.assertFalse((self.root / "escape.txt").exists())
+        result = browser.post("/api/load", data={"files": (io.BytesIO(b"text"), "notes.txt")}, headers={"Origin": "https://other.example"})
+        self.assertEqual(result.status_code, 403)
+
+    def test_upload_large_text_and_chat_request_limit(self):
+        browser = create_app(self.settings).test_client()
+        body = b"<large>" + b"Backup VM. " * 7000 + b"</large>"
+        events = self.upload(browser, "large.txt", body)
+        self.assertEqual(events[1]["type"], "loaded")
+        result = browser.post("/api/chat", json={"question": "a" * 70000})
+        self.assertEqual(result.status_code, 413)
+        self.assertIn("64 KB", result.json["error"])
+
+    def test_empty_knowledge_and_template_buttons(self):
+        browser = create_app(self.settings).test_client()
+        self.assertEqual(browser.get("/api/knowledge").json, {"files": [], "procedures": 0})
+        page = browser.get("/").data.decode()
+        self.assertIn('id="open-loader"', page)
+        self.assertIn('id="show-knowledge"', page)
+        self.assertIn("knowledge.js", page)
+        self.assertIn("Active read timeout: 500 seconds", page)
+
+    def test_explicit_timeout_overrides_environment_and_is_visible(self):
+        with patch.dict("os.environ", {"OLLAMA_TIMEOUT": "120"}):
+            from metropole.cli import build_parser
+            args = build_parser().parse_args(["serve", "--timeout", "500"])
+            self.assertEqual(args.timeout, 500)
+            self.assertEqual(Settings.from_env().timeout, 120)
+        settings = Settings(self.settings.host, database=self.settings.database, timeout=321)
+        browser = create_app(settings).test_client()
+        self.assertIn("Active read timeout: 321 seconds", browser.get("/").data.decode())
+        self.assertEqual(browser.get("/api/status").json["timeout"], 321)
+
+    def test_cancelled_upload_removes_temporary_copies(self):
+        from tempfile import TemporaryDirectory as RealTemporaryDirectory
+        staging_paths = []
+
+        def staging(*args, **kwargs):
+            directory = RealTemporaryDirectory(*args, **kwargs)
+            staging_paths.append(Path(directory.name))
+            return directory
+
+        browser = create_app(self.settings).test_client()
+        with patch("metropole.web.TemporaryDirectory", side_effect=staging):
+            response = browser.post("/api/load", data={"files": (io.BytesIO(b"<vm>Backup VM</vm>"), "notes.txt")}, buffered=False)
+            self.assertTrue(staging_paths[0].exists())
+            response.close()
+        self.assertFalse(staging_paths[0].exists())
+        self.assertEqual(self.store.list_procedures(), [])
+
     def test_interactive_loader_and_chat(self):
         path = self.root / "notes.txt"
         path.write_text("<avamar>Confirm backup date before restoring Avamar files.</avamar>")
