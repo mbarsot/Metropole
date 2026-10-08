@@ -1,0 +1,43 @@
+:root { color-scheme: light; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #25363b; background: #f8faf9; }
+* { box-sizing: border-box; }
+body { margin: 0; display: flex; min-height: 100dvh; }
+button, textarea { font: inherit; }
+button { cursor: pointer; border: 1px solid #d6e0dc; border-radius: 8px; background: #fff; color: inherit; padding: 12px 16px; }
+button:hover { background: #edf4f0; }
+button:disabled { cursor: wait; opacity: .6; }
+button:focus-visible, textarea:focus-visible { outline: 3px solid #63aa95; outline-offset: 2px; }
+aside { width: 280px; flex-shrink: 0; background: #eff4f1; border-right: 1px solid #dce5df; padding: 30px 24px; display: flex; flex-direction: column; gap: 16px; }
+.brand { display: flex; align-items: center; gap: 12px; font-size: 22px; letter-spacing: -.5px; }
+.logo { color: #fff; background: #286d57; padding: 6px 12px; border-radius: 9px; }
+.eyebrow { font-size: 10px; font-weight: 650; letter-spacing: 1.7px; color: #758a7f; }
+.repository { margin-top: 24px; border-top: 1px solid #d9e2dc; padding-top: 22px; font-size: 13px; line-height: 2; }
+.repository strong { font-size: 21px; margin-left: 15px; }
+.dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #408b6e; margin-right: 8px; }
+.connection { font-size: 12px; margin-top: auto; overflow-wrap: anywhere; }
+.connection code { font-size: 11px; }
+.connection button { font-size: 12px; padding: 8px 12px; }
+.aside-note { font-size: 11px; line-height: 1.7; color: #6d7e74; }
+main { flex: 1; min-width: 0; display: flex; flex-direction: column; height: 100dvh; }
+header { display: flex; align-items: center; justify-content: space-between; padding: 22px 36px; border-bottom: 1px solid #e6ece8; font-size: 13px; }
+.badge { color: #5b7868; border: 1px solid #d2e1d7; border-radius: 5px; padding: 5px 8px; font-size: 9px; letter-spacing: 1px; }
+#messages { flex: 1; overflow-y: auto; padding: 28px max(24px, calc((100% - 800px) / 2)); }
+#welcome { margin: 12vh auto 0; max-width: 620px; }
+h1 { font-weight: 550; font-size: clamp(26px, 3vw, 38px); letter-spacing: -1.3px; margin: 16px 0; }
+#welcome > p:not(.eyebrow) { color: #73817a; font-size: 14px; line-height: 1.8; }
+.suggestions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 30px; }
+.suggestions button { font-size: 12px; padding: 15px; }
+.empty-note { margin-top: 24px; font-size: 12px !important; }
+.message { max-width: 800px; padding: 18px 22px; margin: 0 auto 20px; border: 1px solid #e0e8e2; border-radius: 12px; background: #fff; }
+.message.user { background: #edf4ef; border-color: #e0e9e2; }
+.message h2 { font-size: 12px; color: #417158; margin: 0; }
+.message p { white-space: pre-wrap; font-size: 14px; line-height: 1.8; overflow-wrap: anywhere; }
+details { font-size: 12px; border-top: 1px solid #e4ece6; padding: 10px 0; }
+summary { cursor: pointer; overflow-wrap: anywhere; color: #547664; }
+details p { color: #65766b; font-size: 12px !important; }
+form { position: relative; margin: 15px max(24px, calc((100% - 800px) / 2)) 0; }
+textarea { width: 100%; resize: vertical; min-height: 85px; max-height: 200px; padding: 16px 110px 16px 18px; border: 1px solid #cbdad0; border-radius: 12px; background: #fff; font-size: 14px; line-height: 1.6; }
+#send { position: absolute; right: 12px; top: 17px; color: #fff; background: #286d57; border: 0; font-size: 12px; }
+#error { color: #a33232; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+footer { text-align: center; color: #88978e; font-size: 10px; padding: 0 20px 18px; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); }
+@media (max-width: 750px) { body { display: block; } aside { width: 100%; padding: 16px 20px; gap: 8px; border-right: 0; border-bottom: 1px solid #dce5df; } aside .eyebrow, .repository, .aside-note { display: none; } .brand { font-size: 18px; } .connection { margin: 0; } .connection p { display: inline; margin-right: 8px; } .connection code { display: block; margin: 6px 0; } main { height: calc(100dvh - 200px); min-height: 400px; } header { padding: 16px 22px; } #welcome { margin-top: 2vh; } }

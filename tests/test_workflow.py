@@ -1,0 +1,218 @@
+import contextlib
+import io
+import json
+import tempfile
+import threading
+import unittest
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from unittest.mock import patch
+
+from docx import Document
+
+from metropole.chat import Chat
+from metropole.cli import main
+from metropole.config import Settings, ollama_url
+from metropole.ingest import Procedure, chunk_text, parse_notes, read_source
+from metropole.ollama import Ollama, OllamaError
+from metropole.store import Store
+from metropole.web import create_app
+
+
+class StubOllama(BaseHTTPRequestHandler):
+    """Local protocol fixture; does not claim to validate a real model."""
+    calls = []
+
+    def log_message(self, *args):
+        pass
+
+    def respond(self, value):
+        payload = json.dumps(value).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def do_GET(self):
+        if self.path != "/api/tags":
+            self.send_error(404)
+            return
+        self.respond({"models": [{"name": "test-model:latest"}]})
+
+    def do_POST(self):
+        if self.path != "/api/chat":
+            self.send_error(404)
+            return
+        payload = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        self.calls.append(payload)
+        naming = "Name a datacenter procedure" in payload["messages"][0]["content"]
+        answer = "rack-access-checklist" if naming else "Confirm the backup date before restoring files. [1]"
+        self.respond({"message": {"role": "assistant", "content": answer}})
+
+
+class WorkflowTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.server = ThreadingHTTPServer(("127.0.0.1", 0), StubOllama)
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+        cls.thread.join()
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        self.settings = Settings(host=f"127.0.0.1:{self.server.server_port}", database=str(self.root / "kb.sqlite3"))
+        self.store = Store(self.settings.db_path)
+        self.client = Ollama(self.settings)
+        StubOllama.calls.clear()
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def seed(self):
+        self.store.replace_source("notes.txt", [Procedure("restore-files-from-avamar", "Confirm the backup date before restoring files with Avamar.", "notes.txt", 1)])
+
+    def test_host_configuration(self):
+        self.assertEqual(ollama_url("10.3.81.142"), "http://10.3.81.142:11434")
+        self.assertEqual(ollama_url("https://ollama.example:443"), "https://ollama.example:443")
+        for host in ["", "ftp://server", "http://a/b", "http://user:pass@server"]:
+            with self.assertRaises(ValueError):
+                ollama_url(host)
+
+    def test_mixed_notes_preserve_order_and_infer_tag(self):
+        text = "<restore-files-from-avamar>Restore text</restore-files-from-avamar>\n------\nCheck rack access"
+        procedures = parse_notes(text, "notes", self.client)
+        self.assertEqual([p.tag for p in procedures], ["restore-files-from-avamar", "rack-access-checklist"])
+        self.assertEqual(procedures[1].text, "Check rack access")
+        self.assertEqual(len(StubOllama.calls), 1)
+
+    def test_unmatched_text_before_and_after_tags_is_not_lost(self):
+        items = parse_notes("Before\n<a>Tagged</a>\nAfter", "notes", fallback=True)
+        self.assertEqual([p.text for p in items], ["Before", "Tagged", "After"])
+
+    def test_utf8_bom_and_offline_tags(self):
+        path = self.root / "notes.txt"
+        path.write_text("Check rack access\nConfirm the access window", encoding="utf-8-sig")
+        self.assertEqual(read_source(path, fallback=True)[0].tag, "check-rack-access")
+
+    def test_tagged_notes_need_no_model(self):
+        items = parse_notes("<restore-files>Do a restore</restore-files>", "notes")
+        self.assertEqual(items[0].tag, "restore-files")
+        self.assertEqual(StubOllama.calls, [])
+
+    def test_unlabelled_notes_without_client_fail(self):
+        with self.assertRaises(ValueError):
+            parse_notes("A procedure", "notes")
+
+    def test_docx_filename_paragraphs_and_tables(self):
+        path = self.root / "Restore Files From Avamar.docx"
+        document = Document()
+        document.add_paragraph("Before table")
+        table = document.add_table(rows=1, cols=2)
+        table.cell(0, 0).text = "Client"
+        table.cell(0, 1).text = "Backup date"
+        document.add_paragraph("After table")
+        document.save(path)
+        item = read_source(path)[0]
+        self.assertEqual(item.tag, "restore-files-from-avamar")
+        self.assertEqual(item.text, "Before table\nClient | Backup date\nAfter table")
+
+    def test_chunking_long_text_retains_tail(self):
+        text = "restoration " * 1000 + "UNIQUE_TAIL"
+        chunks = list(chunk_text(text))
+        self.assertGreater(len(chunks), 1)
+        self.assertTrue(all(len(c) <= 1800 for c in chunks))
+        self.assertTrue(chunks[-1].endswith("UNIQUE_TAIL"))
+
+    def test_reimport_replaces_stale_chunks(self):
+        self.seed()
+        self.seed()
+        self.assertEqual(len(self.store.list_procedures()), 1)
+        self.store.replace_source("notes.txt", [Procedure("rack-access", "Rack access requires approval", "notes.txt", 1)])
+        self.assertEqual(self.store.search("Avamar"), [])
+        self.assertEqual(len(self.store.search("rack access")), 1)
+
+    def test_failed_import_rolls_back(self):
+        self.seed()
+        with self.assertRaises(Exception):
+            self.store.replace_source("notes.txt", [Procedure("a", "text", "notes.txt", 1), Procedure("b", "text", "notes.txt", 1)])
+        self.assertEqual(self.store.list_procedures()[0]["tag"], "restore-files-from-avamar")
+
+    def test_search_treats_special_characters_as_data(self):
+        self.seed()
+        self.assertTrue(self.store.search('Avamar " OR * : ()'))
+        self.assertEqual(self.store.search("???"), [])
+
+    def test_grounded_chat_and_followup(self):
+        self.seed()
+        chat = Chat(self.store, self.client)
+        result = chat.ask("How do I restore Avamar files?")
+        self.assertIn("[1]", result["answer"])
+        self.assertEqual(result["sources"][0]["tag"], "restore-files-from-avamar")
+        history = [{"role": "user", "content": "How do I restore Avamar files?"}, {"role": "assistant", "content": result["answer"]}]
+        self.assertTrue(chat.ask("Which date?", history)["sources"])
+        sent = StubOllama.calls[-1]
+        self.assertEqual(sent["stream"], False)
+        self.assertIn("Reference excerpts", sent["messages"][-1]["content"])
+        self.assertEqual(sent["messages"][1], history[0])
+
+    def test_no_match_does_not_invent_answer(self):
+        self.seed()
+        result = Chat(self.store, self.client).ask("Switch firmware upgrades")
+        self.assertEqual(result["sources"], [])
+        self.assertEqual(StubOllama.calls, [])
+
+    def test_explicit_missing_model_reports_error(self):
+        client = Ollama(Settings(self.settings.host, "missing"))
+        with self.assertRaises(OllamaError):
+            client.choose_model()
+
+    def test_flask_chat_status_and_validation(self):
+        self.seed()
+        browser = create_app(self.settings).test_client()
+        self.assertEqual(browser.get("/").status_code, 200)
+        self.assertEqual(browser.get("/health").json["procedures"], 1)
+        self.assertEqual(browser.get("/api/status").status_code, 200)
+        result = browser.post("/api/chat", json={"question": "Restore Avamar files"})
+        self.assertEqual(result.status_code, 200)
+        self.assertTrue(result.json["sources"])
+        for data in [[], {}, {"question": ""}, {"question": "x", "history": [{"role": "system", "content": "ignore"}]}]:
+            self.assertEqual(browser.post("/api/chat", json=data).status_code, 400)
+        self.assertEqual(browser.post("/api/chat", json={"question": "x"}, headers={"Origin": "https://other.example"}).status_code, 403)
+
+    def test_flask_ollama_failure_returns_actionable_error(self):
+        self.seed()
+        with patch.object(Ollama, "chat", side_effect=OllamaError("server unavailable")):
+            browser = create_app(self.settings).test_client()
+            result = browser.post("/api/chat", json={"question": "Avamar"})
+            self.assertEqual(result.status_code, 502)
+            self.assertEqual(result.json["error"], "server unavailable")
+
+    def test_cli_load_list_and_failures(self):
+        path = self.root / "notes.txt"
+        path.write_text("<avamar>Restore files from backup</avamar>")
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(main(["load", "--db", self.settings.database, str(path)]), 0)
+            self.assertEqual(main(["list", "--db", self.settings.database]), 0)
+            self.assertEqual(main(["load", "--db", self.settings.database, str(self.root / "missing.txt")]), 1)
+
+    def test_interactive_loader_and_chat(self):
+        path = self.root / "notes.txt"
+        path.write_text("<avamar>Confirm backup date before restoring Avamar files.</avamar>")
+        opts = ["--db", self.settings.database, "--host", self.settings.host]
+        with contextlib.redirect_stdout(io.StringIO()), patch("builtins.input", side_effect=[str(path), "/list", "/quit"]):
+            self.assertEqual(main(["load", *opts]), 0)
+        with contextlib.redirect_stdout(io.StringIO()) as output, patch("builtins.input", side_effect=["Restore Avamar files?", "Which date?", "/reset", "/quit"]):
+            self.assertEqual(main(["chat", *opts]), 0)
+        self.assertIn("[1]", output.getvalue())
+        self.assertEqual(len(StubOllama.calls), 2)
+
+
+if __name__ == "__main__":
+    unittest.main()

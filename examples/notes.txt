@@ -1,0 +1,9 @@
+<restore-files-from-avamar>
+Example only, not an approved operating procedure.
+Before restoring files with Avamar, confirm the restore request, source client,
+backup date, and destination with the responsible operator.
+</restore-files-from-avamar>
+------
+Example only: rack access checklist
+Confirm the rack identifier and approved access window with the datacenter team.
+Record the visit in the site log.

@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools==80.9.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "metropole"
+version = "0.1.0"
+description = "Datacenter procedure ingestion and grounded chat with Ollama"
+requires-python = ">=3.11"
+dependencies = ["Flask==3.1.2", "requests==2.32.5", "python-docx==1.2.0"]
+
+[project.scripts]
+metropole = "metropole.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["metropole*"]
+
+[tool.setuptools.package-data]
+metropole = ["templates/*.html", "static/*.css", "static/*.js"]

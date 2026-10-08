@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Metropole · Datacenter knowledge</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script src="{{ url_for('static', filename='chat.js') }}" defer></script>
+</head>
+<body>
+  <aside>
+    <div class="brand"><span class="logo">M</span><strong>Metropole</strong></div>
+    <p class="eyebrow">OPERATIONS KNOWLEDGE</p>
+    <button id="reset" type="button">＋ New conversation</button>
+    <div class="repository"><span class="dot"></span> Knowledge repository<br><strong>{{ count }}</strong> procedures loaded</div>
+    <div class="connection"><p>Ollama connection</p><code>{{ host }}</code><p id="connection-status">Model: {{ model }}</p><button id="check" type="button">Check connection</button></div>
+    <p class="aside-note">Answers refer to your imported procedures. Review instructions before performing an operation.</p>
+  </aside>
+  <main>
+    <header><span>Datacenter assistant</span><span class="badge">LOCAL MODEL</span></header>
+    <section id="messages" aria-live="polite" aria-label="Conversation">
+      <div id="welcome"><p class="eyebrow">YOUR PROCEDURES, WITH CONTEXT</p><h1>What are you working on?</h1><p>Find an operating procedure, ask about its steps, and follow up on the details.</p><div class="suggestions"><button type="button" data-question="How do I restore files from Avamar?">Restore files from Avamar ↗</button><button type="button" data-question="What prerequisites should I check before a restore?">Check restore prerequisites ↗</button></div><p class="empty-note">Load your notes and documents with the Metropole loader to begin.</p></div>
+    </section>
+    <form id="chat-form"><label class="sr-only" for="question">Your question</label><textarea id="question" rows="2" maxlength="4000" placeholder="Ask about a procedure…" required></textarea><button id="send" type="submit">Send ↑</button><p id="error" role="alert"></p></form>
+    <footer>Grounded in your knowledge repository · Conversations stay in this tab</footer>
+  </main>
+</body>
+</html>
