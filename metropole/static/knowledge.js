@@ -45,20 +45,16 @@ async function refreshKnowledge() {
   }
 }
 
-document.querySelector('#open-loader').addEventListener('click', () => {
-  knowledgeDialog.showModal();
-  document.querySelector('#loader-section').scrollIntoView({ block: 'start' });
-  refreshKnowledge();
-});
-document.querySelector('#show-knowledge').addEventListener('click', async () => {
+document.querySelector('#show-knowledge')?.addEventListener('click', async () => {
   knowledgeDialog.showModal();
   await refreshKnowledge();
   document.querySelector('#knowledge-section').scrollIntoView({ block: 'start' });
 });
-document.querySelector('#close-knowledge').addEventListener('click', () => knowledgeDialog.close());
+document.querySelector('#close-knowledge')?.addEventListener('click', () => knowledgeDialog.close());
 document.querySelector('#refresh-knowledge').addEventListener('click', refreshKnowledge);
 
 uploadForm.addEventListener('submit', async (event) => {
+  if (typeof ReadableStream === 'undefined') return; // Native form fallback.
   event.preventDefault();
   if (uploading) return;
   const selected = [
@@ -141,3 +137,5 @@ uploadForm.addEventListener('submit', async (event) => {
     await refreshKnowledge();
   }
 });
+
+if (!knowledgeDialog) refreshKnowledge();

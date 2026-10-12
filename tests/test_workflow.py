@@ -470,6 +470,35 @@ class WorkflowTests(unittest.TestCase):
         self.assertFalse(staging_paths[0].exists())
         self.assertEqual(self.store.list_procedures(), [])
 
+    def test_dedicated_upload_page_and_native_form(self):
+        browser = create_app(self.settings).test_client()
+        index = browser.get("/").data.decode()
+        self.assertIn('href="/load"', index)
+        page = browser.get("/load")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn('action="/load"', page.data.decode())
+        self.assertIn('enctype="multipart/form-data"', page.data.decode())
+        result = browser.post("/load", data={"files": [
+            (io.BytesIO(b"<vm-backup>Back up the VM.</vm-backup>"), "VM Notes.txt"),
+            (io.BytesIO(b""), ""),  # Unused folder chooser must not count as a file.
+        ]})
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(result.mimetype, "text/html")
+        self.assertIn("VM Notes.txt: loaded 1 skills", result.data.decode())
+        self.assertIn("&lt;vm-backup&gt;", result.data.decode())
+        self.assertTrue(self.store.search("VM backup"))
+
+    def test_native_form_offline_labels_and_validation(self):
+        browser = create_app(self.settings).test_client()
+        result = browser.post("/load", data={"files": (io.BytesIO(b"Check rack access"), "notes.txt"), "offline_tags": "true"})
+        self.assertEqual(result.status_code, 200)
+        self.assertIn("&lt;check-rack-access&gt;", result.data.decode())
+        self.assertEqual(StubOllama.calls, [])
+        result = browser.post("/load")
+        self.assertEqual(result.status_code, 400)
+        self.assertEqual(result.mimetype, "text/html")
+        self.assertIn("Choose at least one", result.data.decode())
+
     def test_interactive_loader_and_chat(self):
         path = self.root / "notes.txt"
         path.write_text("<avamar>Confirm backup date before restoring Avamar files.</avamar>")

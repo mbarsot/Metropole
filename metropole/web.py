@@ -35,6 +35,8 @@ def create_app(settings=None, *, client=None):
     @app.errorhandler(RequestEntityTooLarge)
     def too_large(exc):
         limit = "64 KB" if request.path == "/api/chat" else "100 MB"
+        if request.path == "/load":
+            return render_loader(error=f"Upload exceeds {limit}. Choose fewer or smaller files."), 413
         return jsonify(error=f"Request exceeds the {limit} limit. Upload fewer or smaller files."), 413
 
     @app.get("/api/knowledge")
@@ -51,16 +53,30 @@ def create_app(settings=None, *, client=None):
                                    "characters": item["characters"]})
         return jsonify(files=list(files.values()), procedures=len(procedures))
 
+    def render_loader(results=None, error=None):
+        return render_template("loader.html", inventory=knowledge().get_json(),
+                               results=results or [], error=error)
+
+    @app.get("/load")
+    def loader_page():
+        return render_loader()
+
+    @app.post("/load")
     @app.post("/api/load")
     def load():
-        uploads = request.files.getlist("files")
+        def invalid(message):
+            if request.path == "/load":
+                return render_loader(error=message), 400
+            return jsonify(error=message), 400
+
+        uploads = [upload for upload in request.files.getlist("files") if upload.filename]
         if not uploads:
-            return jsonify(error="Choose at least one .txt, .md, or .docx file."), 400
+            return invalid("Choose at least one .txt, .md, or .docx file.")
         if len(uploads) > 200:
-            return jsonify(error="Upload at most 200 files at a time."), 400
+            return invalid("Upload at most 200 files at a time.")
         offline = request.form.get("offline_tags", "false")
         if offline not in {"true", "false"}:
-            return jsonify(error="offline_tags must be true or false."), 400
+            return invalid("offline_tags must be true or false.")
 
         # Flask closes request-owned upload streams when returning a response.
         # Stage our own temporary copies before starting progress streaming.
@@ -113,6 +129,10 @@ def create_app(settings=None, *, client=None):
                 yield json.dumps({"type": "done", "loaded": loaded, "failed": failed}) + "\n"
             finally:
                 staging.cleanup()
+
+        if request.path == "/load":
+            results = [json.loads(event) for event in events()]
+            return render_loader(results=results)
 
         response = Response(stream_with_context(events()), mimetype="application/x-ndjson",
                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})

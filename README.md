@@ -166,6 +166,9 @@ you expand each source excerpt. Conversation history stays in terminal memory or
 the browser tab; it is not stored in the database.
 
 The Flask sidebar includes **Load documents** and **Show loaded knowledge**.
+**Load documents** opens a dedicated `/load` page with file pickers and a
+**Load selected documents** button. It also supports normal browser form uploads
+when JavaScript is unavailable. With JavaScript enabled it shows streamed progress.
 Select multiple `.txt`, `.md`, or `.docx` files, or select a folder to include its
 subfolders (folder selection requires a supporting browser such as Chrome or Edge).
 Upload progress shows which files were loaded, each assigned `<skill>` tag, and

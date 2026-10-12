@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Load documents · Metropole</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css', v='loader2') }}">
+  <script src="{{ url_for('static', filename='knowledge.js', v='loader2') }}" defer></script>
+</head>
+<body class="loader-page">
+  <main class="loader-container">
+    <div class="dialog-heading"><h1>Load documents</h1><a class="action-link" href="{{ url_for('index') }}">← Back to chat</a></div>
+    <p>Select files from your computer, then click <strong>Load selected documents</strong>.</p>
+    <p><strong id="procedure-count">{{ inventory.procedures }}</strong> skills currently loaded.</p>
+    {% if error %}<p class="import-failed" role="alert">{{ error }}</p>{% endif %}
+    {% if results %}
+      <section aria-label="Import results"><h3>Import results</h3><ul>
+      {% for result in results %}
+        {% if result.type == 'loaded' %}<li>{{ result.filename }}: loaded {{ result.procedures }} skills — {% for tag in result.skills %}&lt;{{ tag }}&gt; {% endfor %}</li>
+        {% elif result.type == 'failed' %}<li class="import-failed">{{ result.filename }}: {{ result.error }}</li>
+        {% elif result.type == 'done' %}<li>Finished: {{ result.loaded }} files loaded, {{ result.failed }} failed.</li>{% endif %}
+      {% endfor %}
+      </ul></section>
+    {% endif %}
+    {% include '_loader_form.html' %}
+    <section id="knowledge-section"><div class="dialog-heading"><h3>Loaded files and &lt;skills&gt;</h3><button id="refresh-knowledge" type="button">Refresh</button></div>
+      <p id="knowledge-status" role="status">{{ inventory.files|length }} files · {{ inventory.procedures }} skills</p>
+      <div id="knowledge-list">
+        {% for file in inventory.files %}<article class="knowledge-file"><h4>{{ file.filename }}</h4><p>{{ file.source }}</p><ul>{% for skill in file.skills %}<li><code>&lt;{{ skill.tag }}&gt;</code> · section {{ skill.section }}</li>{% endfor %}</ul></article>{% else %}<p>No knowledge loaded yet.</p>{% endfor %}
+      </div>
+    </section>
+  </main>
+</body>
+</html>
