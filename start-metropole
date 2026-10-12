@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Start Flask from any directory, including through a symlink in $HOME or PATH.
+set -euo pipefail
+
+launcher_path="${BASH_SOURCE[0]}"
+while [[ -L "$launcher_path" ]]; do
+    launcher_directory="$(cd -P -- "$(dirname -- "$launcher_path")" && pwd)"
+    launcher_path="$(readlink -- "$launcher_path")"
+    [[ "$launcher_path" = /* ]] || launcher_path="$launcher_directory/$launcher_path"
+done
+
+project_directory="${METROPOLE_DIR:-$(cd -P -- "$(dirname -- "$launcher_path")" && pwd)}"
+if [[ ! -f "$project_directory/metropole/cli.py" ]]; then
+    printf 'Cannot find Metropole in %s. Keep this script in the project folder or set METROPOLE_DIR.\n' "$project_directory" >&2
+    exit 1
+fi
+if [[ ! -x "$project_directory/.venv/bin/python" ]]; then
+    printf 'The virtual environment is missing. Run: cd "%s" && bash scripts/setup.sh\n' "$project_directory" >&2
+    exit 1
+fi
+
+# Keep the knowledge database path independent of the caller's directory.
+cd -- "$project_directory"
+if [[ "${1:-}" == "serve" ]]; then
+    shift
+fi
+exec "$project_directory/.venv/bin/python" -m metropole serve "$@"

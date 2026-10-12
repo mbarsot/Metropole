@@ -106,6 +106,35 @@ as an actual operating procedure or mix examples into your real knowledge databa
 
 ## Conversational assistant
 
+To start the Flask interface without activating the virtual environment:
+
+```sh
+chmod +x /path/to/Metropole/start-metropole
+/path/to/Metropole/start-metropole
+```
+
+The launcher works from any directory, switches to the project folder so the
+same knowledge database is used, and runs the project's `.venv` Python directly.
+To make it available from your home directory, create a symlink once:
+
+```sh
+ln -s /path/to/Metropole/start-metropole "$HOME/start-metropole"
+```
+
+Then start it from anywhere with:
+
+```sh
+"$HOME/start-metropole"
+"$HOME/start-metropole" serve
+"$HOME/start-metropole" --host 10.3.81.142 --timeout 500 --port 5000
+```
+
+Replace `/path/to/Metropole` with your actual folder. Press Ctrl+C to stop.
+If you prefer to copy the launcher outside the project rather than symlink it,
+set `METROPOLE_DIR` to the project's absolute path. Startup options and environment
+defaults are the same as `metropole serve`. No dependencies are installed at startup;
+if `.venv` is missing, run `bash scripts/setup.sh` in the project folder first.
+
 ```sh
 metropole chat --host 10.3.81.142
 metropole serve --host 10.3.81.142 --port 5000
