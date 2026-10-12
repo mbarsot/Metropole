@@ -113,6 +113,11 @@ chmod +x /path/to/Metropole/start-metropole
 /path/to/Metropole/start-metropole
 ```
 
+No arguments are required. `./start-metropole` (or the included
+`./start-metrople` alias) starts Flask on port 5000 with Ollama at
+`10.3.81.142:11434` and a 500-second read timeout. The timeout is explicitly
+set so an old `OLLAMA_TIMEOUT=120` cannot silently override it.
+
 The launcher works from any directory, switches to the project folder so the
 same knowledge database is used, and runs the project's `.venv` Python directly.
 To make it available from your home directory, create a symlink once:
@@ -132,7 +137,9 @@ Then start it from anywhere with:
 Replace `/path/to/Metropole` with your actual folder. Press Ctrl+C to stop.
 If you prefer to copy the launcher outside the project rather than symlink it,
 set `METROPOLE_DIR` to the project's absolute path. Startup options and environment
-defaults are the same as `metropole serve`. No dependencies are installed at startup;
+defaults apply as usual, except the launcher explicitly sets the host, port, and
+timeout above. Additional command arguments can override those values.
+No dependencies are installed at startup;
 if `.venv` is missing, run `bash scripts/setup.sh` in the project folder first.
 
 ```sh
